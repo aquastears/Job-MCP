@@ -1,116 +1,298 @@
-import AnimatedJobTitle from '@/components/AnimatedJobTitle';
-import Link from 'next/link';
+'use client';
 
-export default function Home() {
+// frontend/app/dashboard/page.tsx
+// Replaces the static demo version with live data from the FastAPI backend.
+// Auth pattern matches the rest of the app (supabase.auth.getSession).
+// API shape matches backend/app/routers/apply.py exactly.
+
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { useDashboard, JobApplicationRow } from '@/hooks/useDashboard';
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+
+type StatusKey = JobApplicationRow['status'];
+
+const STATUS_BADGE: Record<StatusKey, { label: string; className: string }> = {
+  auto_applied: {
+    label: 'Auto-Applied',
+    className:
+      'px-2.5 py-1 rounded-full text-xs bg-sky-400/20 text-sky-300 border border-sky-300/20',
+  },
+  follow_up_required: {
+    label: 'Needs Follow-Up',
+    className:
+      'px-2.5 py-1 rounded-full text-xs bg-amber-300/20 text-amber-200 border border-amber-300/20',
+  },
+  completed: {
+    label: 'Completed',
+    className:
+      'px-2.5 py-1 rounded-full text-xs bg-emerald-400/20 text-emerald-300 border border-emerald-300/20',
+  },
+};
+
+function StatusBadge({ status }: { status: StatusKey }) {
+  const cfg = STATUS_BADGE[status] ?? STATUS_BADGE.auto_applied;
+  return <span className={cfg.className}>{cfg.label}</span>;
+}
+
+function fmt(iso: string) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
+// ── Skeleton row ──────────────────────────────────────────────────────────────
+
+function SkeletonRows() {
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Hero Section */}
-      <main className="container mx-auto px-6 md:px-12 lg:px-20 pt-32 pb-24">
-        <div className="text-center mb-20 max-w-5xl mx-auto">
-          <AnimatedJobTitle />
-          <p className="text-xl md:text-2xl text-gray-400 mb-10 px-4">
-            AI-powered applications for students.
-          </p>
-          <div className="flex gap-5 justify-center items-center">
-            <Link
-              href="/dashboard"
-              className="bg-white text-black px-8 py-3.5 rounded-full font-semibold hover:bg-gray-200 transition-all shadow-lg text-base"
-            >
-              Get Started
-            </Link>
-            <Link
-              href="#features"
-              className="bg-transparent border border-white text-white px-8 py-3.5 rounded-full font-semibold hover:bg-white hover:text-black transition-all text-base"
-            >
-              Learn More
-            </Link>
-          </div>
-        </div>
+    <>
+      {[...Array(4)].map((_, i) => (
+        <tr key={i} className="animate-pulse">
+          {[...Array(8)].map((_, j) => (
+            <td key={j} className="px-4 py-3 border-b border-white/5">
+              <div className="h-3 bg-white/10 rounded w-24" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
 
-        {/* Features Grid - Bento Style */}
-        <div id="features" className="max-w-6xl mx-auto mb-32">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
-            {/* Profile Creation Card - Top Left */}
-            <div className="bg-zinc-900/50 backdrop-blur rounded-3xl p-8 md:p-10 flex flex-col justify-between min-h-[400px] md:min-h-[450px] border border-white/5">
-              <div>
-                <h2 className="text-3xl md:text-4xl font-semibold mb-4">Profile creation</h2>
-                <p className="text-gray-400 text-lg leading-relaxed max-w-xs">
-                  Easily build your job-ready profile with resume upload and AI parsing.
-                </p>
-              </div>
-              <div className="mt-auto pt-12 flex justify-center">
-                <div className="w-32 h-32 bg-zinc-800/80 rounded-2xl border border-white/5"></div>
-              </div>
-            </div>
+// ── Follow-up cell ────────────────────────────────────────────────────────────
 
-            {/* Auto-apply Card - Top Right (Taller) */}
-            <div className="bg-zinc-900/50 backdrop-blur rounded-3xl p-8 md:p-10 flex flex-col min-h-[400px] md:min-h-[500px] row-span-1 border border-white/5">
-              <div className="mt-auto pt-12 flex justify-center">
-                <div className="w-36 h-36 bg-zinc-800/80 rounded-full border border-white/5"></div>
-              </div>
-              <div className="mt-12">
-                <h2 className="text-3xl md:text-4xl font-semibold mb-4">Auto-apply</h2>
-                <p className="text-gray-400 text-lg leading-relaxed max-w-xs">
-                  Let our AI-driven system automatically apply to tailored opportunities.
-                </p>
-              </div>
-            </div>
+interface FollowUpCellProps {
+  job: JobApplicationRow;
+  loading: boolean;
+  error: string | null;
+  onToggle: (confirmed: boolean) => void;
+}
 
-            {/* Stats Tracking Card - Bottom Left (Wider) */}
-            <div className="md:col-span-2 bg-zinc-900/50 backdrop-blur rounded-3xl p-8 md:p-10 flex flex-col md:flex-row justify-between items-end min-h-[350px] md:min-h-[400px] border border-white/5">
-              <div className="mb-8 md:mb-0">
-                <h2 className="text-3xl md:text-4xl font-semibold mb-4">Stats tracking</h2>
-                <p className="text-gray-400 text-lg leading-relaxed max-w-md">
-                  Monitor application progress, stats, and real-time outcomes visually.
-                </p>
-              </div>
-              <div className="flex items-center justify-center w-full md:w-auto">
-                <div className="relative">
-                  <div 
-                    className="w-0 h-0"
-                    style={{
-                      borderLeft: '50px solid transparent',
-                      borderRight: '50px solid transparent',
-                      borderBottom: '90px solid rgb(39 39 42 / 0.8)',
-                    }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+function FollowUpCell({ job, loading, error, onToggle }: FollowUpCellProps) {
+  const [confirming, setConfirming] = useState(false);
+  const next = !job.follow_up_confirmed;
+
+  if (loading) {
+    return <span className="text-white/40 text-xs">Saving…</span>;
+  }
+
+  // Inline confirm/cancel before firing the PATCH
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-white/60 text-xs">
+          {next ? 'Mark confirmed?' : 'Unmark?'}
+        </span>
+        <button
+          onClick={() => { setConfirming(false); onToggle(next); }}
+          className="text-xs px-2 py-1 rounded bg-white text-black font-semibold hover:bg-white/90 transition-colors"
+        >
+          Yes
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="text-xs px-2 py-1 rounded text-white/60 hover:text-white transition-colors"
+        >
+          No
+        </button>
+        {error && <span className="text-red-400 text-xs ml-1">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+      <input
+        type="checkbox"
+        checked={job.follow_up_confirmed}
+        onChange={() => setConfirming(true)}
+        className="h-4 w-4 rounded border-white/30 bg-transparent accent-white cursor-pointer"
+      />
+      <span className="text-white/80 text-sm group-hover:text-white transition-colors">
+        {job.follow_up_confirmed ? 'Confirmed' : 'Confirm'}
+      </span>
+      {error && <span className="text-red-400 text-xs">!</span>}
+    </label>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Dashboard() {
+  const router = useRouter();
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userId, setUserId] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+
+  // Auth — matches existing pattern in the codebase
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { router.push('/login'); return; }
+      setUserId(session.user.id);
+      setUserEmail(session.user.email ?? '');
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session) { router.push('/login'); return; }
+      setUserId(session.user.id);
+      setUserEmail(session.user.email ?? '');
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  const { rows, loading, error, followUpLoading, followUpError, refresh, sendFollowUp } =
+    useDashboard(userId);
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => ({
+    total: rows.length,
+    autoApplied: rows.filter(r => r.status === 'auto_applied').length,
+    followUpRequired: rows.filter(r => r.status === 'follow_up_required').length,
+    completed: rows.filter(r => r.status === 'completed').length,
+  }), [rows]);
+
+  if (authLoading) {
+    return (
+      <main className="min-h-screen bg-black flex items-center justify-center">
+        <span className="text-white/60">Loading…</span>
       </main>
+    );
+  }
 
-      {/* Footer */}
-      <footer className="border-t border-zinc-800/50 py-20">
-        <div className="container mx-auto px-6 md:px-12 lg:px-20">
-          <div className="flex flex-col md:flex-row justify-between items-start max-w-6xl mx-auto">
-            <div className="mb-8 md:mb-0">
-              <h3 className="text-2xl font-semibold">R&A</h3>
+  return (
+    <main className="min-h-screen bg-black text-white pt-24 px-4 md:px-6 pb-10">
+      <div className="max-w-7xl mx-auto">
+
+        {/* Header */}
+        <div className="mb-6 flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-4xl font-bold mb-1">Application Grid</h1>
+            <p className="text-white/60">
+              Live applications for <span className="text-white/80">{userEmail}</span>
+            </p>
+          </div>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="text-sm font-medium px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all disabled:opacity-40"
+          >
+            {loading ? 'Refreshing…' : '↻ Refresh'}
+          </button>
+        </div>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          {[
+            { label: 'Total Rows',      value: stats.total,           sub: 'All tracked applications' },
+            { label: 'Auto-Applied',    value: stats.autoApplied,     sub: 'No action needed yet'     },
+            { label: 'Needs Follow-Up', value: stats.followUpRequired, sub: 'Pending manual step'      },
+            { label: 'Completed',       value: stats.completed,       sub: 'Follow-up confirmed'      },
+          ].map(({ label, value, sub }) => (
+            <div
+              key={label}
+              className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6"
+            >
+              <div className="text-white/60 text-sm mb-2">{label}</div>
+              <div className="text-3xl font-bold mb-1">{value}</div>
+              <div className="text-white/40 text-xs">{sub}</div>
             </div>
-            <div>
-              <h4 className="text-sm font-medium mb-6 text-gray-400">Resources</h4>
-              <ul className="space-y-3">
-                <li>
-                  <Link href="/resources/about" className="text-gray-500 hover:text-white transition text-sm">
-                    About
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/resources/privacy" className="text-gray-500 hover:text-white transition text-sm">
-                    Privacy
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/resources/support" className="text-gray-500 hover:text-white transition text-sm">
-                    Contact
-                  </Link>
-                </li>
-              </ul>
-            </div>
+          ))}
+        </div>
+
+        {/* API error banner */}
+        {error && (
+          <div className="mb-4 p-3 rounded-lg border border-red-400/30 bg-red-400/10 text-red-300 text-sm flex items-center justify-between gap-4">
+            <span>{error}</span>
+            <button
+              onClick={refresh}
+              className="underline text-red-200 hover:text-white transition-colors shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Table */}
+        <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/10 text-sm text-white/60">
+            Jobs are fetched live from{' '}
+            <code className="text-white/80 font-mono text-xs">GET /apply/jobs/{'{user_id}'}</code>.
+            Confirming follow-up calls{' '}
+            <code className="text-white/80 font-mono text-xs">PATCH /apply/jobs/{'{job_id}'}/follow-up</code>.
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1000px] text-sm">
+              <thead className="bg-white/5 text-white/60">
+                <tr>
+                  {[
+                    'Company', 'Role', 'Location', 'Source',
+                    'Auto-Applied At', 'Status', 'Requires Follow-Up', 'Follow-Up Confirmed',
+                  ].map(h => (
+                    <th key={h} className="text-left font-medium px-4 py-3 border-b border-white/10">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {/* Loading skeletons on first load */}
+                {loading && rows.length === 0 && <SkeletonRows />}
+
+                {/* Empty state */}
+                {!loading && !error && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-12 text-center text-white/50">
+                      No applications yet. Auto-applied jobs will appear here automatically.
+                    </td>
+                  </tr>
+                )}
+
+                {rows.map(job => (
+                  <tr key={job.id} className="hover:bg-white/[0.03] transition-colors">
+                    <td className="px-4 py-3 border-b border-white/5 font-medium">
+                      {job.company}
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5">
+                      {job.title}
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5 text-white/70">
+                      {job.location ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5 text-white/70">
+                      {job.source ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5 text-white/70 whitespace-nowrap">
+                      {fmt(job.auto_applied_at)}
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5">
+                      <StatusBadge status={job.status} />
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5">
+                      <span className={job.requires_follow_up ? 'text-amber-200' : 'text-white/40'}>
+                        {job.requires_follow_up ? 'Yes' : 'No'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 border-b border-white/5">
+                      <FollowUpCell
+                        job={job}
+                        loading={!!followUpLoading[job.id]}
+                        error={followUpError[job.id] ?? null}
+                        onToggle={(confirmed) => sendFollowUp(job.id, confirmed)}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      </footer>
-    </div>
+      </div>
+    </main>
   );
 }
